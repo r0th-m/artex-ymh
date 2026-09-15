@@ -12,6 +12,7 @@ import (
 
 	"github.com/Autumn-27/artex/agent/chainskel"
 	"github.com/Autumn-27/artex/db"
+	"github.com/Autumn-27/artex/intercept"
 	"github.com/Autumn-27/norma/agentcore"
 	"github.com/Autumn-27/norma/harness"
 	"github.com/Autumn-27/norma/llm"
@@ -447,7 +448,9 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	// 期 3b:本任务有独立 MITM 实例时用它的地址+CA(上游=任务隧道 socks);
 	// 否则回落全局记录代理/全局出口代理。
 	proxyAddr, proxyCA := w.proxyForTask(taskID)
-	ctx = withTaskReviewContext(ctx, taskID, ts, runDir, intent)
+	// The run-wide intent is not the current tool action. Do not forward it or
+	// inherit a parent run's background into the action reviewer.
+	ctx = intercept.WithReviewContext(ctx, runDir, intercept.ReviewBackground{})
 	overview := renderWorkerGraphOverview(tsx.graphOverviewData())
 	sysBody := workerSystem(proxyAddr, proxyCA, w.workDir, runDir, w.intranetForTask(taskID))
 	if w.wantConstraints() {

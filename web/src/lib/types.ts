@@ -1306,6 +1306,13 @@ export interface LLMTask {
 // The exact JSON sent to the review model, retained for all model verdicts.
 export interface InterceptReviewInput {
   version: number;
+  background?: {
+    // worker_summary is retained only for immutable v2/v3 snapshots.
+    source: "user_message" | "worker_summary";
+    text: string;
+    truncated?: boolean;
+  };
+  // Version 1 snapshots are immutable and remain readable in historical audits.
   task?: {
     task_id: number;
     description: string;
@@ -1317,7 +1324,8 @@ export interface InterceptReviewInput {
   worker_intent?: string;
   turn_input?: string;
   background_truncated?: boolean;
-  history: {
+  // Legacy v1/v2 snapshots only; v3 never sends execution history.
+  history?: {
     tool_use_id: string;
     tool: string;
     arguments_preview: string;
@@ -1326,7 +1334,7 @@ export interface InterceptReviewInput {
     truncated?: boolean;
   }[];
   history_truncated?: boolean;
-  correlation: "exact" | "ambiguous" | "unavailable";
+  correlation?: "exact" | "ambiguous" | "unavailable";
   tool_name: string;
   arguments: Record<string, unknown>;
 }
@@ -1455,6 +1463,7 @@ export interface UpdateProgress {
   error?: string;
 }
 
+<<<<<<< HEAD
 // ---------------------------------------------------------------------------
 // 内网作战（/intranet）：拓扑 / 会话（webshell) / 隧道 / 凭据。
 // 形状与后端契约一一对应；Go 侧 nil slice 序列化为 null,api 层统一 arr() 兜底。
@@ -1563,4 +1572,13 @@ export interface Credential {
   created_at: string;
   /** 归属任务 id（后端 JSON number；0 = 未关联）。 */
   task_id?: number;
+}
+
+// Original execution selected from an approval, never submitted to the reviewer.
+export interface InterceptExecution {
+  conversation_id: number | null;
+  task_id: string | null;
+  session: string;
+  seq: number;
+  items: Activity[];
 }
