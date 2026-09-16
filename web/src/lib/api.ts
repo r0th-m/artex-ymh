@@ -5,6 +5,7 @@
 
 import { auth } from "@/lib/auth";
 import { refreshAccessToken } from "@/lib/auth-refresh";
+import type { ChatMention } from "@/lib/chat-mentions";
 import { MOCK } from "@/lib/mock/enabled";
 import { mockHandle } from "@/lib/mock/handler";
 import type {
@@ -766,6 +767,8 @@ export const api = {
     if (!r.ok) throw new Error(`report: ${r.status}`);
     return r.text();
   },
+  chatMentions: (kind: string, query: string, signal?: AbortSignal, cursor = "") =>
+    http<{ items: ChatMention[]; next_cursor?: string }>(`/chat/mentions?${new URLSearchParams({ kind, q: query, cursor })}`, { signal }),
   chat: (message: string, task?: string, attachments?: ChatAttachment[], seg?: number) =>
     post<{ reply: string; mode: string }>(`/chat${tq(task)}`, { message, attachments, seg }),
   chatStatus: (taskId: string) => get<{ running: boolean }>(`/tasks/${taskId}/chat/status`),
