@@ -1214,6 +1214,11 @@ export interface PendingScopeRow {
   decided_at?: string;
 }
 
+export interface InterceptApprovalFilter {
+  status?: InterceptPending["status"];
+  decision_source?: "rule" | "model" | "unknown";
+}
+
 // InterceptApprovalRow enriches InterceptPending with conversation/task and rule context.
 export interface InterceptApprovalRow extends InterceptPending {
   conv_title: string; // "" if no linked conversation
@@ -1463,7 +1468,6 @@ export interface UpdateProgress {
   error?: string;
 }
 
-<<<<<<< HEAD
 // ---------------------------------------------------------------------------
 // 内网作战（/intranet）：拓扑 / 会话（webshell) / 隧道 / 凭据。
 // 形状与后端契约一一对应；Go 侧 nil slice 序列化为 null,api 层统一 arr() 兜底。
