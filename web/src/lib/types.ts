@@ -418,6 +418,7 @@ export interface TaskNode {
   ts: string;
   source_task_id?: string;
   inherited?: boolean;
+  delete_reason?: string; // 意图假删除(state='deleted')时的删除原因
 }
 
 // 目标管理卡片用的目标(后端已把 payload 拆成 text/vulnclass)。
@@ -732,7 +733,7 @@ export interface LogLine {
 }
 
 export type SessionRole = "mainagent" | "planner" | "worker" | "system";
-export type SessionStatus = "running" | "paused" | "done" | "blocked" | "exhausted" | "pending" | "stopped";
+export type SessionStatus = "running" | "paused" | "done" | "blocked" | "exhausted" | "pending" | "stopped" | "deleted";
 
 // Daily token aggregate bucket (GET /api/tokens/daily).
 export interface DailyTokenBucket {
