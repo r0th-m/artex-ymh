@@ -508,7 +508,7 @@ flowchart TB
 https://github.com/oritera/Cairn
 
 
-## 许可
+## 许可与免责声明
 
 ### 开源协议
 
