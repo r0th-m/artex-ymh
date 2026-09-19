@@ -1346,3 +1346,11 @@ CREATE TABLE IF NOT EXISTS tunnels (
 );
 CREATE INDEX IF NOT EXISTS idx_tunnels_task ON tunnels(task_id);
 CREATE INDEX IF NOT EXISTS idx_tunnels_state ON tunnels(state);
+
+-- =====================================================================
+-- M. 批 6 L1 蜜罐静态签名识别(HONEYPOT-DETECTION-DESIGN.md 二·L1)
+-- =====================================================================
+-- honeypot_score: 0-1,命中静态签名的最高置信度(0=无信号);重复评估取更高分。
+-- honeypot_evidence: 命中签名证据,JSON 数组文本(如 ["cowrie_default_ssh_banner(Cowrie, 0.99)"]),合并去重。
+ALTER TABLE assets ADD COLUMN IF NOT EXISTS honeypot_score REAL NOT NULL DEFAULT 0;
+ALTER TABLE assets ADD COLUMN IF NOT EXISTS honeypot_evidence TEXT NOT NULL DEFAULT '';

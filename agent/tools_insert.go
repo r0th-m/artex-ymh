@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/Autumn-27/artex/db"
+	"github.com/Autumn-27/artex/honeydetect"
 	actool "github.com/Autumn-27/norma/tool"
 )
 
@@ -59,6 +60,9 @@ type assetInputItem struct {
 	// ---- service (other) ----
 	Port  int    `json:"port"`
 	Proto string `json:"proto"`
+
+	// ---- service 可选:协议 banner / HTTP Server 头(批 6 L1 蜜罐静态签名识别用,不落库) ----
+	Banner string `json:"banner"`
 
 	// ---- endpoint ----
 	Method string           `json:"method"`
@@ -137,6 +141,8 @@ func (t *ToolSet) insertAssets() actool.CoreTool {
 					// service (other，非 HTTP)
 					"service_name": str("服务名称，如 ssh/mysql/redis（service 非 HTTP 时必填）"),
 					"port":         intp("端口号（service 非 HTTP 时必填）"),
+					// service 可选（HTTP/非 HTTP 均可）
+					"banner": str("服务 banner 或 HTTP Server 响应头原文（可选，如 \"SSH-2.0-OpenSSH_6.0p1 Debian-4+deb7u2\"；用于蜜罐静态签名识别，侦察时见到就带上）"),
 					// endpoint
 					"method": str("HTTP 方法：GET/POST/PUT/PATCH/DELETE 等（endpoint 必填）"),
 					"params": map[string]any{
@@ -234,6 +240,12 @@ func (t *ToolSet) insertAssets() actool.CoreTool {
 							IP:            svcIP,
 							TaskID:        taskID,
 						})
+						if err == nil {
+							// 批 6 L1:落库后跑蜜罐静态签名(title/banner;httpx 回写同路径)。
+							t.evaluateHoneypot(id, honeydetect.ServiceView{
+								Port: urlPort(item.URL), Banner: item.Banner, Title: item.PageTitle,
+							})
+						}
 					} else {
 						id, err = t.as.UpsertOtherService(db.UpsertOtherServiceReq{
 							Domain:      item.Domain,
@@ -243,6 +255,12 @@ func (t *ToolSet) insertAssets() actool.CoreTool {
 							Auth:        item.Auth,
 							TaskID:      taskID,
 						})
+						if err == nil {
+							// 批 6 L1:落库后跑蜜罐静态签名(port/banner)。
+							t.evaluateHoneypot(id, honeydetect.ServiceView{
+								Port: item.Port, Banner: item.Banner,
+							})
+						}
 					}
 
 				case "endpoint":

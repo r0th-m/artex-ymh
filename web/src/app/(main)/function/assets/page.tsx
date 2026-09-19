@@ -88,6 +88,33 @@ function MethodBadge({ method }: { method: string }) {
   );
 }
 
+// 批 6 L1 蜜罐静态签名徽标:score≥0.9 红色"蜜罐"、其余 >0 黄色"疑似"、0 不显示;
+// hover 显示命中签名证据(honeypot_evidence 为 JSON 数组文本,解析失败按原文展示)。
+function HoneypotBadge({ score, evidence }: { score?: number; evidence?: string }) {
+  if (!score || score <= 0) {
+    return <span className="text-xs text-muted-foreground">—</span>;
+  }
+  let sigs = evidence || "";
+  try {
+    const arr = JSON.parse(evidence || "[]") as unknown;
+    if (Array.isArray(arr) && arr.length > 0) sigs = arr.join("\n");
+  } catch {
+    /* 证据非 JSON 数组时按原文展示 */
+  }
+  const high = score >= 0.9;
+  return (
+    <span
+      title={`蜜罐评分 ${score.toFixed(2)}\n命中签名:\n${sigs}`}
+      className={cn(
+        "inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold leading-none",
+        high ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-700",
+      )}
+    >
+      {high ? "蜜罐" : "疑似"}
+    </span>
+  );
+}
+
 function statusTone(code: number) {
   if (code >= 500) return "text-red-500";
   if (code >= 400) return "text-amber-500";
@@ -591,7 +618,7 @@ export default function AssetsPage() {
         <TabsContent value="service" className="mt-0 flex min-h-0 flex-1 flex-col gap-2">
           {searchBox}
           <AssetCard
-            cols={["", "服务", "域名", "IP", "端口", "状态码", "标题", "指纹", "认证", ""]}
+            cols={["", "服务", "域名", "IP", "端口", "状态码", "标题", "指纹", "蜜罐", "认证", ""]}
             loaded={loaded}
             total={total}
             page={page}
@@ -651,6 +678,9 @@ export default function AssetsPage() {
                   </TableCell>
                   <TableCell>
                     <Chips items={a.technologies ?? []} />
+                  </TableCell>
+                  <TableCell>
+                    <HoneypotBadge score={a.honeypot_score} evidence={a.honeypot_evidence} />
                   </TableCell>
                   <TableCell>
                     {(a.auth ?? []).length === 0 ? (

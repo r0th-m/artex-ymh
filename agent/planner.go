@@ -339,7 +339,8 @@ func plannerSystem(goal, dataDir, workDir string) string {
 	body := renderSystem("planner", plannerDefaultTmpl, PlannerVars{Goal: goal, DataDir: dataDir, Now: nowStr()})
 	// untrustedDataRule 与 L2 meta 铁律(chainskel.PlannerMetaRules)是静态固定文本
 	// (不含每轮变量),追加在代码固定尾,不破坏跨轮缓存。
-	return body + artifactSpec(workDir) + untrustedDataRule + chainskel.PlannerMetaRules
+	// plannerHoneypotRules(批 6 L1 蜜罐处置纪律)同为代码固定尾,一律追加。
+	return body + artifactSpec(workDir) + untrustedDataRule + chainskel.PlannerMetaRules + plannerHoneypotRules
 }
 
 // Plan runs one planning round. emit, if non-nil, receives the planner's execution

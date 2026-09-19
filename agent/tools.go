@@ -533,6 +533,19 @@ func (t *ToolSet) graphOverviewData() map[string]any {
 	}
 	out["finding_list"] = findingList
 	out["findings"] = confirmedFindings // 确认漏洞数（目标判定看它；C4: 不含 pending/误报）
+	// 批 6 L1:疑似蜜罐资产清单(静态签名命中,score>0,上限 20 条,评分降序)。
+	// 单信号只降级不封锁——处置纪律在系统提示固定尾(plannerHoneypotRules)。
+	if t.as != nil && t.taskID > 0 {
+		if pots, err := t.as.HoneypotAssetsByTask(t.taskID, 20); err == nil && len(pots) > 0 {
+			plist := make([]map[string]any, 0, len(pots))
+			for _, p := range pots {
+				plist = append(plist, map[string]any{
+					"id": p.ID, "asset": p.Label, "score": p.Score, "signatures": p.Evidence,
+				})
+			}
+			out["honeypot_assets"] = plist
+		}
+	}
 	// Build facts, split hot (active context — a fact under a live intent) from cold
 	// (not-yet-folded). Hidden (folded & still cold) ones are surfaced via cold_digests.
 	var recentFactsHot, recentFactsCold []map[string]any

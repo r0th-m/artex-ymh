@@ -252,6 +252,9 @@ export interface Asset {
   task_source?: string;
   task_source_summary?: string;
   task_source_node_id?: number;
+  // 批 6 L1 蜜罐静态签名:0=无信号;evidence 为命中签名(JSON 数组文本)
+  honeypot_score?: number;
+  honeypot_evidence?: string;
 }
 
 export interface IntentAsset {
