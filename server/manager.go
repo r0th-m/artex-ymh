@@ -412,8 +412,8 @@ func NewManager(dir, proxyAddr string) (*Manager, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
-	// 批 6 L1 蜜罐静态签名库:装配 dataDir 下的签名文件绝对路径(缺失/损坏时
-	// 引擎空载不报错;仓库 data/signatures/honeypot.json 为种子文件)。
+	// 批 6 L1 蜜罐静态签名库:装配 dataDir 下的签名文件绝对路径(存在则优先并按
+	// mtime 热更新,便于不落盘发版地运营签名库;缺失时引擎回落包内嵌签名库,不空载)。
 	honeydetect.SetSignaturesPath(filepath.Join(dir, "signatures", "honeypot.json"))
 	dsn, source, err := pgdb.DSN()
 	if err != nil {

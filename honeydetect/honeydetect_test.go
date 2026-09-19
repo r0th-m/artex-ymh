@@ -97,12 +97,11 @@ func mustStat(t *testing.T, p string) os.FileInfo {
 	return fi
 }
 
-// TestBundledSignaturesLoad 仓库内置签名库必须可解析、且每条都有来源与条件。
+// TestBundledSignaturesLoad 仓库内嵌签名库必须可解析、且每条都有来源与条件。
 func TestBundledSignaturesLoad(t *testing.T) {
-	e := NewEngine(filepath.Join("..", "data", "signatures", "honeypot.json"))
-	sigs := e.signatures()
+	sigs := parseSignatures(embeddedSignatures)
 	if len(sigs) == 0 {
-		t.Fatal("内置签名库为空或解析失败")
+		t.Fatal("内嵌签名库为空或解析失败")
 	}
 	for _, s := range sigs {
 		if s.Name == "" || s.Product == "" || s.Source == "" {
@@ -115,10 +114,11 @@ func TestBundledSignaturesLoad(t *testing.T) {
 			t.Fatalf("签名 %s 没有任何匹配条件", s.Name)
 		}
 	}
-	// 抽两条内置签名做实命中验证。
+	// 内嵌库在签名文件缺失时应作为兜底返回(抽两条做实命中验证)。
+	e := NewEngine(filepath.Join(t.TempDir(), "nonexistent.json"))
 	score, _ := e.Evaluate(ServiceView{Port: 22, Banner: "SSH-2.0-OpenSSH_6.0p1 Debian-4+deb7u2"})
 	if score != 0.99 {
-		t.Fatalf("内置 Cowrie 签名未命中, score=%v", score)
+		t.Fatalf("内嵌 Cowrie 签名未命中, score=%v", score)
 	}
 	score, _ = e.Evaluate(ServiceView{CertIssuer: "C=DE, CN=Nepenthes Development Team, O=dionaea.carnivore.it, OU=anv"})
 	if score != 0.9 {

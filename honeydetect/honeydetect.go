@@ -1,12 +1,14 @@
 // Package honeydetect 是批 6 L1 蜜罐静态签名识别层(设计文档
 // HONEYPOT-DETECTION-DESIGN.md 二·L1):对 service 资产已知的静态特征
 // (banner/HTTP 标题/正文/TLS 证书)做子串签名匹配,产出 0-1 的蜜罐置信度
-// 评分与命中证据。签名库是数据文件 data/signatures/honeypot.json(按 mtime
-// 热更新,不用 fsnotify);文件缺失/损坏时引擎空载不报错(开发态)。
+// 评分与命中证据。签名库默认内嵌在本包(go:embed signatures.json);server 启动
+// 时若 dataDir/signatures/honeypot.json 存在则优先用之并按 mtime 热更新(便于
+// 不落盘发版地运营签名库),不存在则用内嵌库,永不空载。
 // 签名只收录有公开来源的(来源写在每条签名的 source 字段),严禁编造。
 package honeydetect
 
 import (
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -14,6 +16,12 @@ import (
 	"sync"
 	"time"
 )
+
+// embeddedSignatures 是内嵌签名库(与 signatures.json 同文件),作为签名文件
+// 缺失时的兜底——平台任何部署形态下签名识别都可用,不依赖 dataDir 种子拷贝。
+//
+//go:embed signatures.json
+var embeddedSignatures []byte
 
 // ServiceView 是一次签名评估的输入视图:调用方填手头已有的字段,没有就留空。
 type ServiceView struct {
@@ -92,15 +100,19 @@ type Engine struct {
 // NewEngine 以指定签名文件路径建引擎。路径缺失/损坏不报错,Evaluate 返回 0 分。
 func NewEngine(path string) *Engine { return &Engine{path: path} }
 
-// signatures 返回当前生效签名;文件 mtime 变化时重载,读不到/解析失败时空载。
+// signatures 返回当前生效签名:签名文件存在时按 mtime 热更新;文件缺失/读不到/
+// 解析失败时回落内嵌签名库(只解析一次,后续命中缓存)。
 func (e *Engine) signatures() []Signature {
 	fi, err := os.Stat(e.path)
 	if err != nil {
 		e.mu.Lock()
-		e.sigs = nil
+		if e.sigs == nil {
+			e.sigs = parseSignatures(embeddedSignatures)
+		}
 		e.modTime = time.Time{}
+		sigs := e.sigs
 		e.mu.Unlock()
-		return nil
+		return sigs
 	}
 	e.mu.RLock()
 	if !e.needsReload(fi.ModTime()) {
@@ -112,20 +124,34 @@ func (e *Engine) signatures() []Signature {
 
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	data, err := os.ReadFile(e.path)
+	sigs := parseSignatures(mustRead(e.path))
+	if sigs == nil {
+		sigs = parseSignatures(embeddedSignatures)
+	}
+	e.sigs, e.modTime = sigs, fi.ModTime()
+	return e.sigs
+}
+
+func mustRead(path string) []byte {
+	data, err := os.ReadFile(path)
 	if err != nil {
-		e.sigs, e.modTime = nil, fi.ModTime()
+		return nil
+	}
+	return data
+}
+
+// parseSignatures 解析签名库 JSON;解析失败返回 nil(调用方自行回落)。
+func parseSignatures(data []byte) []Signature {
+	if len(data) == 0 {
 		return nil
 	}
 	var file struct {
 		Signatures []Signature `json:"signatures"`
 	}
 	if json.Unmarshal(data, &file) != nil {
-		e.sigs, e.modTime = nil, fi.ModTime()
 		return nil
 	}
-	e.sigs, e.modTime = file.Signatures, fi.ModTime()
-	return e.sigs
+	return file.Signatures
 }
 
 // needsReload 报告缓存的签名是否落后于该 mtime(读锁内快速路径)。
