@@ -8,7 +8,7 @@
 #   docker compose build    # compose 已指向本文件
 
 # ---------- ① 前端静态导出 ----------
-FROM node:22-bookworm-slim AS fe
+FROM node:22-alpine AS fe
 # 可选构建参数:国内构建用镜像源,默认官方源
 ARG NPM_REGISTRY=https://registry.npmjs.org
 WORKDIR /src/web
@@ -18,7 +18,7 @@ COPY web/ ./
 RUN npm run build:static
 
 # ---------- ② Go 编译(内嵌前端) ----------
-FROM golang:1.26-bookworm AS gobuild
+FROM golang:1.26-alpine AS gobuild
 ARG GOPROXY=https://proxy.golang.org,direct
 ENV GOPROXY=$GOPROXY
 WORKDIR /src
@@ -27,6 +27,7 @@ RUN go mod download
 COPY . .
 RUN mkdir -p server/webui/dist
 COPY --from=fe /src/web/out/ server/webui/dist/
+# CGO_ENABLED=0 纯静态产物,alpine(musl)构建的二进制在 bookworm 运行时同样可跑
 RUN CGO_ENABLED=0 go build -tags embedui -trimpath -ldflags "-s -w" -o /out/artex ./cmd/artex
 
 # ---------- ③ 运行时(与 Dockerfile 工具层一致) ----------
