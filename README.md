@@ -39,15 +39,21 @@ cd artex-ymh
 
 ### 方式二：从源码编译单二进制
 
+> 前置要求：Go ≥ 1.26、Node ≥ 20（前端构建内存建议 ≥ 4G)。
+> **老发行版注意**:Node ≥ 18 官方构建要求 glibc ≥ 2.28,Ubuntu 18.04(glibc 2.27）无法运行——需用 [unofficial-builds 的 glibc-217 构建](https://unofficial-builds.nodejs.org/download/release/)或换更新的系统。
+> **国内网络**：克隆 GitHub、npm、Go 模块可能需要代理/镜像，参考：`git config --global http.proxy socks5h://127.0.0.1:7890`、`npm config set registry https://registry.npmmirror.com`、`go env -w GOPROXY=https://goproxy.cn,direct`。
+
 ```bash
 git clone https://github.com/r0th-m/artex-ymh.git
 cd artex-ymh
-# 1) 前端静态导出(需要 Node ≥ 20,构建内存建议 ≥ 4G)
+# 1) 前端静态导出
 cd web && npm ci && npm run build:static && cd ..
-# 2) 拷进内嵌目录
+# 2) 拷进内嵌目录(全新克隆下若报目录不存在,先 mkdir -p server/webui/dist)
 cp -r web/out server/webui/dist
 # 3) 编译(-tags embedui 才内嵌前端)
 CGO_ENABLED=0 go build -tags embedui -o artex ./cmd/artex
+# 4) 配置数据库连接(必须,否则起不来)
+cp config.example.json config.json   # 编辑填好 database 段
 ./start.sh
 ```
 
@@ -64,14 +70,17 @@ journalctl -u artex -f
 
 ### 方式四：Docker
 
-仓库根 `docker-compose.yml` 默认指向**上游官方镜像**(`autumn27/artex`，不含二开代码）。要用 Docker 跑二开版，需先自行构建镜像：
+仓库的 `docker-compose.yml` 已配置为**从源码构建二开版镜像**(`Dockerfile.source`：前端构建 → Go 编译 → 工具运行时，全部在 Docker 内完成，宿主无需 Go/Node):
 
 ```bash
-# 先按方式二编出 linux 二进制放 dist/amd64/artex,再:
-docker build --build-arg TARGETARCH=amd64 -t artex-ymh:local .
-# 把 docker-compose.yml 里 artex 服务的 image 改成 artex-ymh:local
-docker compose up -d
+git clone https://github.com/r0th-m/artex-ymh.git
+cd artex-ymh
+cp .env.example .env   # 填 POSTGRES_PASSWORD(不要用 # 字符)
+docker compose up -d --build
 ```
+
+⚠️ 不要把这个 compose 的镜像改成 `autumn27/artex`——那是**上游原版**，不含二开代码（2026-09 实测踩坑：照抄上游 compose 部署会得到原版）。
+⚠️ 构建需要访问 apt/npm/Go 模块源，国内机器请先给 Docker 配代理（`~/.docker/config.json` 的 proxies 段）或镜像站。
 
 ---
 

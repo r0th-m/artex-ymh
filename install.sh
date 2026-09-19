@@ -97,7 +97,8 @@ JSON
   if command -v npm >/dev/null 2>&1; then
     info "构建前端静态产物…"
     ( cd web && npm ci && npm run build:static )
-    rm -rf server/webui/dist && cp -r web/out server/webui/dist
+    # dist 整个被 gitignore,全新克隆下父目录可能不存在,先建再拷(2026-09 实测踩坑)
+    mkdir -p server/webui/dist && rm -rf server/webui/dist && cp -r web/out server/webui/dist
     info "编译内嵌单二进制…"
     CGO_ENABLED=0 go build -tags embedui -trimpath -o artex ./cmd/artex
   else
