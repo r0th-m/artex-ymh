@@ -49,13 +49,15 @@ RUN if [ -n "$APT_MIRROR" ]; then \
       ca-certificates ripgrep curl wget vim git jq unzip \
       dnsutils iputils-ping netcat-openbsd inetutils-telnet whois nmap \
     && rm -rf /var/lib/apt/lists/*
-# Node:官方 tarball + 同源 SHASUMS256 校验(fail-closed)
+# Node:官方 tarball + 同源 SHASUMS256 校验(fail-closed;校验文件里的相对路径
+# 从 CWD 解析,所以统一下载到 /tmp 并在 /tmp 下校验)
 RUN set -e; \
-    curl -fsSL -o /tmp/node.tar.xz "${NODE_DIST_BASE}/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz"; \
+    cd /tmp; \
+    curl -fsSL -o "node-v${NODE_VERSION}-linux-x64.tar.xz" "${NODE_DIST_BASE}/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz"; \
     curl -fsSL "${NODE_DIST_BASE}/v${NODE_VERSION}/SHASUMS256.txt" \
       | grep "node-v${NODE_VERSION}-linux-x64.tar.xz" | sha256sum -c -; \
-    tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1; \
-    rm -f /tmp/node.tar.xz
+    tar -xJf "node-v${NODE_VERSION}-linux-x64.tar.xz" -C /usr/local --strip-components=1; \
+    rm -f "node-v${NODE_VERSION}-linux-x64.tar.xz"
 # Playwright MCP/CLI + chromium(--with-deps 内部还会跑 apt,APT_MIRROR 已生效)
 RUN npm config set registry "$NPM_REGISTRY" \
     && npm install -g @playwright/mcp@0.0.80 @playwright/cli@0.1.19 playwright@1.63.0 \
