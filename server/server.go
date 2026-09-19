@@ -278,6 +278,9 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 	go s.reconcileConcurrency()
 	s.startTaskArchiveWorker()
 	s.wireInterceptReviewer() // LLM 兜底审批:未命中拦截规则的命令交给模型判定
+	// 批 5 B2 出口审查:启动时向进程级共享 EgressGuard 注册平台敏感指纹
+	// (LLM key/jwt.key/gate 路径/PG 密码/callback_addr),所有任务的 guard 即时生效。
+	s.registerEgressFingerprints()
 	return s
 }
 
@@ -431,6 +434,20 @@ func (s *Server) webSearchFor(key string) agent.WebSearchOpts {
 	return o
 }
 
+// uaForTask 返回本任务稳定分配的客户端 UA(批 5 B4):池子读 settings 键
+// web_ua_pool(JSON 字符串数组,每次 run 现读、改池即时生效),未配置用默认池;
+// 选择是 hash(taskID) % len(pool),同一任务永远同一个。无 DB 时直接给默认池结果。
+func (s *Server) uaForTask(taskID int64) string {
+	if s.m == nil || s.m.pg == nil {
+		return agent.PickUA(nil, taskID)
+	}
+	raw, _, err := s.m.pg.GetSetting(settingWebUAPool)
+	if err != nil {
+		raw = ""
+	}
+	return agent.PickUA(agent.UAPoolFromSetting(raw), taskID)
+}
+
 // nonStreamingResolver returns a resolver capturing a profile's streaming choice.
 // The agents read it per run; a profile change rebuilds the agents (applyLLM),
 // so the captured value is always the one in effect for this build.
@@ -502,6 +519,9 @@ func (s *Server) applyLLM(cfg agent.Config) error {
 	s.llmOn = true
 	s.cfgMu.Unlock()
 	s.invalidateTaskAgents()
+	// 批 5 B2 出口审查:applyLLM 是 LLM profile 变更的唯一漏斗(保存/激活/删除
+	// 都经 reapplyActiveProfile→applyLLM),在这里整体替换 llm_api_key 指纹。
+	s.registerEgressFingerprints()
 
 	// wake the active task so a task created while idle starts exploring.
 	if t := s.m.ActiveTask(); t != nil {
@@ -977,7 +997,11 @@ func (s *Server) Handler() http.Handler {
 
 // SetGate 安装反测绘伪装门控(gate.go 的 NewGate 产物;nil = 直通)。
 // 门控位于 requireAuth 外层,过了门控后 JWT 流程一切照旧。
-func (s *Server) SetGate(g *Gate) { s.gate = g }
+func (s *Server) SetGate(g *Gate) {
+	s.gate = g
+	// 批 5 B2:入口路径是平台敏感信息,门控安装/变更后重新注册出口审查指纹。
+	s.registerEgressFingerprints()
+}
 
 // --- handlers ---
 

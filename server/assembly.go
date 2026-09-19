@@ -320,9 +320,23 @@ func wireTools(pg *db.DB, domainReg map[string]actool.CoreTool) {
 				}
 			}
 		}
+		// 批 5 B4:只有 worker 的 BashEnv 注入了 ARTEX_UA(见 worker.go uaEnv),
+		// UA 纪律说明也只绑 worker 的 Bash 描述,其他 agent 无此变量、不 dangling。
+		if agentKey == "worker" {
+			for i, t := range out {
+				if t.Name() == "Bash" {
+					out[i] = agent.DecorateTool(t, t.Description()+bashUANote, t.InputSchema())
+					break
+				}
+			}
+		}
 		return out
 	}
 }
+
+// bashUANote 是批 5 B4 追加进 worker Bash 描述的 UA 使用纪律(与
+// bashInteractiveShellNote 同一套代码固定追加法,DB 描述覆盖不掉)。
+const bashUANote = "\n\nHTTP 客户端(curl/httpx 等)统一使用 $ARTEX_UA 作为 User-Agent(本任务稳定分配,任务内不要更换);禁止裸 Chrome UA+库 TLS 之外的组合伪装(UA/TLS 指纹失配正是反 AI 蜜罐的触发器);疑似反 AI 陷阱的目标改用 browser MCP 访问。"
 
 func contains(ss []string, v string) bool {
 	for _, s := range ss {

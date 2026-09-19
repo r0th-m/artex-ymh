@@ -21,6 +21,7 @@ import (
 	pgdb "github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/enrich"
 	"github.com/Autumn-27/artex/guard"
+	"github.com/Autumn-27/artex/honeydetect"
 	"github.com/Autumn-27/artex/intercept"
 	"github.com/Autumn-27/artex/traffic"
 	"github.com/Autumn-27/artex/tunnel"
@@ -226,6 +227,10 @@ type Manager struct {
 	traffic     *traffic.Traffic       // process-wide recording proxy (may be nil)
 	enrich      *enrich.Engine         // engine-side asset auto-completion (DNS/HTTP)
 	interceptor *intercept.Interceptor // user-configured tool-call interception rules
+	// egress 是批 5 B2 出口审查的进程级敏感指纹集合(见 guard/egress.go):每任务
+	// 的 Guard 都引用这同一份(taskFromPG/agentGuard 装配),server 在启动与 LLM
+	// profile 变更时向它注册指纹,一次注册对全部任务生效。
+	egress *guard.EgressGuard
 
 	companyMu sync.Mutex // serializes task/company-scope commits with live handle registration
 	// taskStateMu preserves commit order between PostgreSQL lifecycle writes and
@@ -293,6 +298,11 @@ const (
 	// defaultConcurrencyLimit is the simultaneous-running-task cap when the feature
 	// is enabled but no explicit limit was saved.
 	defaultConcurrencyLimit = 5
+	// settingTarpitFetchBudget 是批 5 B3 tarpit 熔断的每 host 抓取预算(默认 40,
+	// 见 guard.defaultTarpitFetchBudget);settingWebUAPool 是批 5 B4 的客户端 UA 池
+	// (JSON 字符串数组,空则用 agent.DefaultUAPool)。
+	settingTarpitFetchBudget = "tarpit_fetch_budget"
+	settingWebUAPool         = "web_ua_pool"
 )
 
 // ConcurrencyLimit returns whether the simultaneous-running-task cap is enabled and
@@ -402,6 +412,9 @@ func NewManager(dir, proxyAddr string) (*Manager, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
+	// 批 6 L1 蜜罐静态签名库:装配 dataDir 下的签名文件绝对路径(缺失/损坏时
+	// 引擎空载不报错;仓库 data/signatures/honeypot.json 为种子文件)。
+	honeydetect.SetSignaturesPath(filepath.Join(dir, "signatures", "honeypot.json"))
 	dsn, source, err := pgdb.DSN()
 	if err != nil {
 		return nil, err
@@ -425,7 +438,7 @@ func NewManager(dir, proxyAddr string) (*Manager, error) {
 	if err := pg.EnsureLLMUsageTable(); err != nil {
 		log.Printf("[llmusage] create table: %v", err)
 	}
-	m := &Manager{dir: dir, pg: pg, assets: pg.Assets(), tasks: map[string]*Task{}, interceptor: intercept.New(pg)}
+	m := &Manager{dir: dir, pg: pg, assets: pg.Assets(), tasks: map[string]*Task{}, interceptor: intercept.New(pg), egress: guard.NewEgressGuard()}
 	m.startLLMRecordsRetention()
 	m.startPortAudit() // F13 台账外监听端口审计(仅 Linux;只观测不处置)
 	if proxyAddr != "" {
@@ -1047,9 +1060,39 @@ func unixNanoOrZero(t *time.Time) int64 {
 	return t.UnixNano()
 }
 
-func taskFromPG(pt *pgdb.Task, store *pgdb.ExplorationStore, ic *intercept.Interceptor, pg *pgdb.DB) *Task {
+// newTarpitConfig 装配批 5 B3 tarpit 熔断:预算读 settings 键 tarpit_fetch_budget
+// (每次调用现读,改设置即时生效;非法/<=0 由 guard 回落默认 40);熔断回调写一条
+// hint 节点进探索图——planner 每轮 graph overview 必读 hints(与停滞检测/P0 巡检
+// 的 hint 同一通道),提示停派该 host 方向。
+func newTarpitConfig(pg *pgdb.DB, store *pgdb.ExplorationStore) guard.TarpitConfig {
+	return guard.TarpitConfig{
+		Budget: func() int {
+			v, _, err := pg.GetSetting(settingTarpitFetchBudget)
+			if err != nil {
+				return 0 // 读取失败 → guard 回落默认预算
+			}
+			n, _ := strconv.Atoi(strings.TrimSpace(v))
+			return n
+		},
+		Hint: func(host string, count int) {
+			if store == nil {
+				return
+			}
+			if _, err := store.AddNode(pgdb.KindHint, map[string]any{
+				"text": fmt.Sprintf("【tarpit 熔断】host %s 的抓取调用已达 %d 次,超过预算,疑似 tarpit 迷宫(Nepenthes/AI Labyrinth 类反爬虫陷阱)。请停止向该 host 派发抓取/爬虫类意图,改走其他侦察面;平台侧已对该 host 转为 warn 放行计数。", host, count),
+				"kind": "tarpit", "host": host, "count": count,
+			}, 0, "active", "guard", nil); err != nil {
+				log.Printf("[guard][tarpit] 写 hint 失败: %v", err)
+			}
+		},
+	}
+}
+
+func taskFromPG(pt *pgdb.Task, store *pgdb.ExplorationStore, ic *intercept.Interceptor, pg *pgdb.DB, eg *guard.EgressGuard) *Task {
 	g := guard.NewWithInterceptor(ic)
-	g.SetRoE(newRoEConfig(pg)) // RoE 范围强制(F5):worker 的 Bash/HTTP 目标与 task_scope 比对
+	g.SetRoE(newRoEConfig(pg))          // RoE 范围强制(F5):worker 的 Bash/HTTP 目标与 task_scope 比对
+	g.SetEgress(eg)                     // 批 5 B2 出口审查:进程级共享指纹集合
+	g.SetTarpit(newTarpitConfig(pg, store)) // 批 5 B3 tarpit 熔断(每任务计数,重启清零)
 	return &Task{
 		ID: strconv.FormatInt(pt.ID, 10), ExpID: pt.ExplorationID,
 		Name:       pt.Name,
@@ -1118,7 +1161,7 @@ func (m *Manager) CreateTaskWithOptions(description, goal string, opts pgdb.Task
 	if err != nil {
 		return nil, err
 	}
-	t := taskFromPG(pt, m.pg.Exploration(pt.ExplorationID), m.interceptor, m.pg)
+	t := taskFromPG(pt, m.pg.Exploration(pt.ExplorationID), m.interceptor, m.pg, m.egress)
 	m.mu.Lock()
 	m.tasks[t.ID] = t
 	m.active = t.ID
@@ -1317,7 +1360,7 @@ func (m *Manager) LoadExisting() []*Task {
 		if _, ok := m.tasks[id]; ok {
 			continue
 		}
-		t := taskFromPG(pt, m.pg.Exploration(pt.ExplorationID), m.interceptor, m.pg)
+		t := taskFromPG(pt, m.pg.Exploration(pt.ExplorationID), m.interceptor, m.pg, m.egress)
 		m.tasks[id] = t
 		loaded = append(loaded, t)
 	}

@@ -572,6 +572,7 @@ func (s *Server) agentsForTask(t *Task) *taskAgentBundle {
 	wk.SetWebSearch(s.webSearchFor("worker"))
 	wk.SetConstraintInject(s.constraintInjectWorker) // 操作约束注入 worker(可配置,默认开)
 	wk.SetIntranetResolver(s.taskIntranet)           // 期 4:内网期(立足点/隧道)切 worker.intranet 提示词变体
+	wk.SetUAResolver(s.uaForTask)                    // 批 5 B4:按任务稳定分配的客户端 UA → BashEnv ARTEX_UA
 	pl := agent.NewPlanner(plannerRuntime, "task-router", s.m.dir, tx, plannerRuntime.CompactionWindow(), s.agentMaxTurns("planner"))
 	pl.SetFindingRecorder(s.evidenceStore())
 	pl.SetCompactionWindowResolver(plannerRuntime.CompactionWindow)

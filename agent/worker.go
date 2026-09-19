@@ -91,6 +91,9 @@ type Worker struct {
 	// variant + code-owned 内网红线尾. Read per run so tunnel/session state
 	// changes take effect without rebuilding the agent. nil = 外网(默认)。
 	intranetFn func(taskID int64) bool
+	// uaFn resolves this task's稳定分配的客户端 UA(批 5 B4,settings web_ua_pool,
+	// hash(taskID) % len(pool))。Read per run;nil/空 = 不注入 ARTEX_UA。
+	uaFn func(taskID int64) string
 }
 
 // WorkerSessionID returns the stable transcript key used by a worker intent.
@@ -142,6 +145,17 @@ func (w *Worker) SetIntranetResolver(fn func(taskID int64) bool) { w.intranetFn 
 
 func (w *Worker) intranetForTask(taskID int64) bool {
 	return w.intranetFn != nil && w.intranetFn(taskID)
+}
+
+// SetUAResolver wires a resolver returning the task's稳定分配的客户端 UA
+// (批 5 B4)。nil/unset 或返回空 = 不注入 ARTEX_UA。Read per run, like nonStreaming.
+func (w *Worker) SetUAResolver(fn func(taskID int64) string) { w.uaFn = fn }
+
+func (w *Worker) uaForTask(taskID int64) string {
+	if w.uaFn == nil {
+		return ""
+	}
+	return w.uaFn(taskID)
 }
 
 // SetConstraintInject wires a resolver deciding whether this task's operation
@@ -251,6 +265,15 @@ func proxyEnv(proxyAddr, caCert string) []string {
 	return env
 }
 
+// uaEnv 在 Bash env 上追加 ARTEX_UA(批 5 B4:按任务稳定分配的客户端 UA,
+// worker 的 curl/httpx 等 HTTP 客户端统一使用,任务内不更换)。ua 为空原样返回。
+func uaEnv(env []string, ua string) []string {
+	if ua == "" {
+		return env
+	}
+	return append(env, "ARTEX_UA="+ua)
+}
+
 // workerDefaultTmpl is the built-in EDITABLE body (段 [A]) of the worker system
 // prompt, seeded into agent_prompts. The trafficTool block and the 中间产物输出规约
 // are NOT here — they are code-owned and appended by workerSystem after rendering
@@ -346,7 +369,9 @@ func workerSystem(proxyAddr, caCert, dataDir, runDir string, intranet bool) stri
 	// caCert is present only when the recording MITM is on, which is exactly when
 	// the traffic_* tools are registered — so it gates the traffic-tool note.
 	// Optional finding guidance is added for every role after tool resolution.
-	return body + workerTrafficBlock(caCert != "") + workerArtifactSpec(runDir) + untrustedDataRule + evidenceFirstRule + toolchainRule + chainskel.WorkerMetaRules + tail
+	// workerAntiTrapRules(批 5 B1 反 AI 蜜罐红线)对内外网 worker 一律追加,
+	// 内网红线尾仍只在 intranet 时生效。
+	return body + workerTrafficBlock(caCert != "") + workerArtifactSpec(runDir) + untrustedDataRule + evidenceFirstRule + toolchainRule + chainskel.WorkerMetaRules + workerAntiTrapRules + tail
 }
 
 // renderIntentTask formats the claimed intent for the worker's launch USER message:
@@ -515,8 +540,9 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 		DeepSeekSearchAPIKey:  w.webSearch.DeepSeekAPIKey,
 		DeepSeekSearchModel:   w.webSearch.DeepSeekModel,
 		WebSearchProxy:        w.webSearch.Proxy,
-		// Bash 子命令的 HTTP 默认走记录代理 + 信任其 CA（工具无需 -x/-k）。
-		BashEnv:    proxyEnv(proxyAddr, proxyCA),
+		// Bash 子命令的 HTTP 默认走记录代理 + 信任其 CA（工具无需 -x/-k）;
+		// 另注入 ARTEX_UA=本任务稳定分配的客户端 UA(批 5 B4,curl/httpx 等统一使用)。
+		BashEnv:    uaEnv(proxyEnv(proxyAddr, proxyCA), w.uaForTask(taskID)),
 		WorkingDir: runDir,
 		MaxTurns:   w.maxTurns, // 0 = unlimited (configurable in agent management)
 		// 墙钟预算,轮边界判,不打断半路;0 = 不限。有任务级 deadline 时夹逼到 min(自身预算,
